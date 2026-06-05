@@ -17,25 +17,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
-      - name: Checkout fork (master)
+      - name: Checkout upstream Goob master (+ engine submodules)
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
-
-      - name: Mirror master from upstream Goob (re-apply this workflow)
-        run: |
-          set -e
-          git config user.name "lhdocker-ci"
-          git config user.email "ci@legionhosting.net"
-          cp .github/workflows/mirror-build-server.yml /tmp/wf.yml
-          git remote add upstream https://github.com/Goob-Station/Goob-Station.git
-          git fetch upstream master
-          git reset --hard upstream/master
-          mkdir -p .github/workflows
-          cp /tmp/wf.yml .github/workflows/mirror-build-server.yml
-          git add .github/workflows/mirror-build-server.yml
-          git commit -m "ci: keep mirror build workflow [skip ci]" || echo "no change to workflow"
-          git push --force origin HEAD:master
+          repository: Goob-Station/Goob-Station
+          ref: master
+          submodules: recursive
+          fetch-depth: 1
 
       - name: Resolve upstream version
         id: ver
@@ -61,17 +49,7 @@ jobs:
         with:
           dotnet-version: '9.0.x'
 
-      - name: Setup Python
-        if: steps.check.outputs.exists == 'false'
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.x'
-
-      - name: Init submodules + engine (RUN_THIS.py)
-        if: steps.check.outputs.exists == 'false'
-        run: python RUN_THIS.py
-
-      - name: Package server build (linux-x64)
+      - name: Build & package server (linux-x64)
         if: steps.check.outputs.exists == 'false'
         run: |
           set -e
@@ -83,7 +61,6 @@ jobs:
         if: steps.check.outputs.exists == 'false'
         run: |
           echo "--- release/ ---"; ls -la release/ 2>/dev/null || true
-          echo "--- bin/ ---"; ls -la bin/ 2>/dev/null || true
 
       - name: Publish GitHub Release
         if: steps.check.outputs.exists == 'false'
@@ -99,3 +76,12 @@ jobs:
             -n "Automated server build of upstream Goob-Station@${{ steps.ver.outputs.sha }} ($(date -u +'%Y-%m-%d %H:%M UTC'))" \
             --latest \
             "$f"
+
+      - name: Mirror fork master from upstream (cosmetic, best-effort)
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api -X POST "repos/${{ github.repository }}/merge-upstream" -f branch=master \
+            && echo "fork master synced to upstream" \
+            || echo "mirror sync skipped (releases still track upstream regardless)"
